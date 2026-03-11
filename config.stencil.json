@@ -1,0 +1,11 @@
+{
+  "normalStoreUrl": "https://handle-it.com",
+  "port": 3000,
+  "apiHost": "https://api.bigcommerce.com",
+  "customLayouts": {
+    "brand": {},
+    "category": {},
+    "page": {},
+    "product": {}
+  }
+}

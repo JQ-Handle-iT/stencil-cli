@@ -1,0 +1,61 @@
+[package]
+name = "stencil-but-fast"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "stencil"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.11"
+
+# Async runtime + web framework
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
+
+# Template rendering
+handlebars = "6"
+
+# SCSS compilation
+grass = "0.13"
+
+# File watching
+notify = "6"
+notify-debouncer-mini = "0.4"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# URL handling
+url = "2"
+
+# Regex
+regex = "1"
+lazy_static = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+colored = "2"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Misc
+sha1 = "0.10"
+mime_guess = "2"
+bytes = "1"
+futures = "0.3"
+async-recursion = "1"
+open = "5"
