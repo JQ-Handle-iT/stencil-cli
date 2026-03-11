@@ -2,6 +2,7 @@ use crate::cache::MemoryCache;
 use crate::config::theme_config::ThemeConfigManager;
 use crate::proxy::client::StoreSettingsLocale;
 use crate::config::CustomLayouts;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
@@ -11,6 +12,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub theme_config: Arc<RwLock<ThemeConfigManager>>,
     pub cache: Arc<RwLock<MemoryCache>>,
+    pub css_cache: Arc<RwLock<HashMap<String, String>>>,
     pub theme_path: PathBuf,
     pub store_url: String,
     pub normal_store_url: String,

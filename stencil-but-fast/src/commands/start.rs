@@ -125,6 +125,7 @@ pub async fn run(opts: StartOptions) -> Result<()> {
         http_client,
         theme_config: theme_config_arc.clone(),
         cache: Arc::new(RwLock::new(MemoryCache::new())),
+        css_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
         theme_path: theme_path.clone(),
         store_url: store_url.clone(),
         normal_store_url: resolved_normal_url.clone(),
