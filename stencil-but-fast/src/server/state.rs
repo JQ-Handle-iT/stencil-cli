@@ -2,6 +2,7 @@ use crate::cache::MemoryCache;
 use crate::config::theme_config::ThemeConfigManager;
 use crate::proxy::client::StoreSettingsLocale;
 use crate::config::CustomLayouts;
+use crate::stats::SharedStats;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +24,8 @@ pub struct AppState {
     pub cli_version: String,
     pub store_settings_locale: StoreSettingsLocale,
     pub live_reload_tx: broadcast::Sender<LiveReloadMessage>,
+    /// Populated only when `--gui` is active; None in normal (non-TUI) mode.
+    pub stats: Option<SharedStats>,
 }
 
 #[derive(Debug, Clone)]

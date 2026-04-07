@@ -1,6 +1,7 @@
 use axum::{
     extract::{Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -40,6 +41,28 @@ async fn catch_all_handler(
     routes::renderer::handler_from_request(state, req).await
 }
 
+/// Tower middleware that records every HTTP request into `AppState::stats`
+/// when the TUI is active. Zero-cost (no-op) when `stats` is None.
+async fn request_stats_middleware(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let start = std::time::Instant::now();
+    let method = req.method().to_string();
+    let path = req.uri().path().to_string();
+
+    let response = next.run(req).await;
+
+    if let Some(ref stats) = state.stats {
+        if let Ok(mut s) = stats.lock() {
+            s.record_request(&method, &path, response.status().as_u16(), start.elapsed());
+        }
+    }
+
+    response
+}
+
 pub fn build_router(state: AppState) -> Router {
     let assets_dir = state.theme_path.join("assets");
 
@@ -51,7 +74,10 @@ pub fn build_router(state: AppState) -> Router {
             get(routes::proxy::graphql).post(routes::proxy::graphql),
         )
         .nest_service("/assets", ServeDir::new(assets_dir))
-        // Single catch-all for everything else
         .fallback(catch_all_handler)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_stats_middleware,
+        ))
         .with_state(state)
 }

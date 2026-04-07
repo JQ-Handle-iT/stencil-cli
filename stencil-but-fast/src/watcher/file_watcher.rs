@@ -7,14 +7,17 @@ use tokio::sync::broadcast;
 
 use crate::config::theme_config::ThemeConfigManager;
 use crate::server::state::LiveReloadMessage;
+use crate::stats::SharedStats;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Start watching theme files for changes
+/// Start watching theme files for changes.
+/// `stats` is optional; when provided, reload events are recorded for the TUI.
 pub fn start(
     theme_path: &Path,
     tx: broadcast::Sender<LiveReloadMessage>,
     theme_config: Arc<RwLock<ThemeConfigManager>>,
+    stats: Option<SharedStats>,
 ) -> Result<RecommendedWatcher> {
     let (notify_tx, notify_rx) = mpsc::channel();
 
@@ -60,20 +63,41 @@ pub fn start(
 
             let action = classify_event(&event, &scss_prefix, &templates_prefix, &lang_prefix, &config_file);
 
+            // Helper: get a display-friendly path from the event
+            let changed_path = event
+                .paths
+                .first()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+
             match action {
                 ReloadAction::CssOnly => {
                     tracing::info!("SCSS changed, reloading CSS");
+                    if let Some(ref s) = stats {
+                        if let Ok(mut locked) = s.lock() {
+                            locked.record_css_reload(&changed_path);
+                        }
+                    }
                     let _ = tx.send(LiveReloadMessage::CssReload);
                     last_reload = std::time::Instant::now();
                 }
                 ReloadAction::FullReload => {
                     tracing::info!("File changed, full reload");
+                    if let Some(ref s) = stats {
+                        if let Ok(mut locked) = s.lock() {
+                            locked.record_full_reload(&changed_path);
+                        }
+                    }
                     let _ = tx.send(LiveReloadMessage::FullReload);
                     last_reload = std::time::Instant::now();
                 }
                 ReloadAction::ConfigReload => {
                     tracing::info!("config.json changed, resetting variations");
-                    // Reset theme config
+                    if let Some(ref s) = stats {
+                        if let Ok(mut locked) = s.lock() {
+                            locked.record_full_reload(&changed_path);
+                        }
+                    }
                     let tc = theme_config.clone();
                     tokio::runtime::Handle::current().block_on(async {
                         let mut config = tc.write().await;

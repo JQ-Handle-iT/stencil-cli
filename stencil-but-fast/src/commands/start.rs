@@ -2,14 +2,17 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, RwLock};
 
 use crate::cache::MemoryCache;
+use crate::config::profiles::ProfileStore;
 use crate::config::theme_config::ThemeConfigManager;
 use crate::config::StencilConfig;
 use crate::proxy::BigCommerceClient;
 use crate::server::state::{AppState, LiveReloadMessage};
+use crate::stats::ServerStats;
+use crate::tui::app::{TuiInfo, run_tui};
 use crate::watcher::file_watcher;
 
 pub struct StartOptions {
@@ -20,6 +23,7 @@ pub struct StartOptions {
     pub no_cache: bool,
     pub port: Option<u16>,
     pub work_dir: Option<PathBuf>,
+    pub gui: bool,
 }
 
 pub async fn run(opts: StartOptions) -> Result<()> {
@@ -50,6 +54,9 @@ pub async fn run(opts: StartOptions) -> Result<()> {
     if let Some(ref variation) = opts.variation {
         theme_config.set_variation_by_name(variation)?;
     }
+
+    let theme_name = theme_config.config.name.clone();
+    let theme_version = theme_config.config.version.clone();
 
     let port = opts.port.unwrap_or(stencil_config.general.port);
     let api_host = &stencil_config.general.api_host;
@@ -121,10 +128,19 @@ pub async fn run(opts: StartOptions) -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
+    let cache = Arc::new(RwLock::new(MemoryCache::new()));
+
+    // Stats are only allocated when the TUI is requested
+    let shared_stats = if opts.gui {
+        Some(Arc::new(Mutex::new(ServerStats::new())))
+    } else {
+        None
+    };
+
     let state = AppState {
         http_client,
         theme_config: theme_config_arc.clone(),
-        cache: Arc::new(RwLock::new(MemoryCache::new())),
+        cache: cache.clone(),
         css_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
         theme_path: theme_path.clone(),
         store_url: store_url.clone(),
@@ -136,41 +152,88 @@ pub async fn run(opts: StartOptions) -> Result<()> {
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         store_settings_locale,
         live_reload_tx: live_reload_tx.clone(),
+        stats: shared_stats.clone(),
     };
 
     // Build router
     let app = crate::server::app::build_router(state);
 
-    // Start file watcher
-    let _watcher = file_watcher::start(&theme_path, live_reload_tx, theme_config_arc)?;
+    // Start file watcher (pass stats so reloads are recorded)
+    let _watcher = file_watcher::start(&theme_path, live_reload_tx.clone(), theme_config_arc, shared_stats.clone())?;
 
-    // Print startup info
-    println!();
-    println!("{}", "-----------------Startup Information-------------".dimmed());
-    println!();
-    println!("Store URL: {}", resolved_normal_url.cyan());
-    println!("SSL Store URL: {}", store_url.cyan());
-    println!("Local server: {}", format!("http://localhost:{}", port).cyan());
-    println!();
-    println!("{}", "-------------------------------------------------".dimmed());
-    println!();
-
-    // Open browser if requested
-    if opts.open {
-        let url = format!("http://localhost:{}", port);
-        let _ = open::that(&url);
-    }
-
-    // Start server
+    // Bind the listener before potentially handing off to TUI
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    println!(
-        "{} {}",
-        "Stencil is ready.".bold().green(),
-        format!("Listening on http://localhost:{}", port).dimmed()
-    );
 
-    axum::serve(listener, app).await?;
+    if opts.gui {
+        // In GUI mode: suppress the normal stdout banner (TUI takes over)
+        let variation_name = {
+            // We no longer have a reference to theme_config (moved into state), so
+            // use opts.variation or fall back to a sensible default label.
+            opts.variation.clone().unwrap_or_else(|| "default".to_string())
+        };
+
+        let tui_info = TuiInfo {
+            store_url: resolved_normal_url.clone(),
+            local_url: format!("http://localhost:{}", port),
+            theme_path: theme_path.display().to_string(),
+            variation: variation_name,
+            caching: !opts.no_cache,
+            theme_name,
+            theme_version,
+        };
+
+        if opts.open {
+            let _ = open::that(format!("http://localhost:{}", port));
+        }
+
+        let stats_for_tui = shared_stats.unwrap(); // always Some when gui=true
+        let live_reload_tx_tui = live_reload_tx.clone();
+        let cache_for_tui = cache.clone();
+        let profiles = Arc::new(Mutex::new(ProfileStore::load_or_default(&theme_path)));
+
+        // Run TUI in a blocking thread; server runs in the async executor concurrently
+        let tui_handle = tokio::task::spawn_blocking(move || {
+            run_tui(tui_info, stats_for_tui, cache_for_tui, live_reload_tx_tui, profiles)
+        });
+
+        let server_handle = tokio::spawn(async move {
+            axum::serve(listener, app).await
+        });
+
+        tokio::select! {
+            _ = tui_handle => {
+                // User pressed q — exit cleanly
+                std::process::exit(0);
+            }
+            result = server_handle => {
+                result??;
+            }
+        }
+    } else {
+        // Normal (non-TUI) mode: print the startup banner and serve
+        println!();
+        println!("{}", "-----------------Startup Information-------------".dimmed());
+        println!();
+        println!("Store URL: {}", resolved_normal_url.cyan());
+        println!("SSL Store URL: {}", store_url.cyan());
+        println!("Local server: {}", format!("http://localhost:{}", port).cyan());
+        println!();
+        println!("{}", "-------------------------------------------------".dimmed());
+        println!();
+
+        if opts.open {
+            let _ = open::that(format!("http://localhost:{}", port));
+        }
+
+        println!(
+            "{} {}",
+            "Stencil is ready.".bold().green(),
+            format!("Listening on http://localhost:{}", port).dimmed()
+        );
+
+        axum::serve(listener, app).await?;
+    }
 
     Ok(())
 }

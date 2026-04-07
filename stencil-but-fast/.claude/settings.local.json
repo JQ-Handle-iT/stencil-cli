@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/jq/Documents/stencil-cli/stencil-but-fast -maxdepth 2 -type f -name config* -o -name .*rules -o -name .github)",
+      "Bash(find /c/Users/jq/Documents/stencil-cli/stencil-but-fast -not -path */target/* -type f)"
+    ]
+  }
+}
